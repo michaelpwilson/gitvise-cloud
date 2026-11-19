@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+**/target
+dist
+.wrangler
+.dev.vars
+src
+migrations
+scripts
+worker-configuration.d.ts
+wrangler.jsonc
+tsconfig.json

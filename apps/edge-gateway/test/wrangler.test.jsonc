@@ -1,0 +1,26 @@
+{
+  // Test-only Worker config. Lists just the bindings the tests exercise: Durable Objects, D1, R2, and KV. Containers,
+  // Workers AI, Queues, and Workflows are replaced by in-test doubles, and no remote resource is touched.
+  // It is never deployed.
+  "name": "gitvise-gateway-tests",
+  "main": "worker.ts",
+  "compatibility_date": "2026-11-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      { "name": "WORKTREE_MUTEX", "class_name": "WorktreeMutex" },
+      { "name": "SWARM_FLOWS", "class_name": "SwarmFlowState" },
+      { "name": "REALTIME_ROOMS", "class_name": "RealtimeRoom" },
+      { "name": "BILLING_GUARD", "class_name": "BillingGuardDurableObject" }
+    ]
+  },
+  "d1_databases": [{ "binding": "D1", "database_name": "gitvise-test", "database_id": "local-test" }],
+  "r2_buckets": [{ "binding": "R2", "bucket_name": "gitvise-test-blobs" }],
+  "kv_namespaces": [{ "binding": "KV", "id": "gitvise-test-kv" }],
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["WorktreeMutex", "SwarmFlowState", "RealtimeRoom", "BillingGuardDurableObject"]
+    }
+  ]
+}

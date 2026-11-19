@@ -1,0 +1,29 @@
+{
+  "name": "gitvise-cloud",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Proprietary Cloudflare-native GitVise SaaS. Workers, Durable Objects, Containers, Workflows, Queues, Vectorize, R2, and Workers AI adapters for @gitvise/core.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "npm@11.3.0",
+  "scripts": {
+    "sync:native": "npm run sync:native -w @gitvise/edge-gateway",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev": "npm run dev -w @gitvise/edge-gateway",
+    "deploy": "npm run deploy -w @gitvise/edge-gateway",
+    "dry-run": "npm run dry-run -w @gitvise/edge-gateway"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261119.1",
+    "@types/node": "^22.0.0",
+    "typescript": "~6.0.3",
+    "wrangler": "^4.165.0"
+  }
+}

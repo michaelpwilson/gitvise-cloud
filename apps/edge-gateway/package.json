@@ -1,0 +1,28 @@
+{
+  "name": "@gitvise/edge-gateway",
+  "version": "0.0.1",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "dry-run": "wrangler deploy --dry-run --outdir dist",
+    "types": "wrangler types",
+    "typecheck": "tsc -p tsconfig.json",
+    "sync:native": "node scripts/sync-native.mjs",
+    "db:migrate:local": "wrangler d1 migrations apply gitvise --local",
+    "db:migrate:remote": "wrangler d1 migrations apply gitvise --remote",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@gitvise/adapter-cloudflare": "*",
+    "@gitvise/core": "file:../../../gitvise/packages/core",
+    "hono": "^4.13.19"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.5",
+    "vitest": "^4.1.0"
+  }
+}

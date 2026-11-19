@@ -1,0 +1,115 @@
+{
+  // Edge gateway for GitVise Cloud. Run `npm run types` after changing bindings.
+  // Replace the REPLACE_ME ids with real resources before `wrangler deploy`.
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "gitvise-edge-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "traces": { "enabled": true }
+  },
+
+  // Workers AI: the `AI` binding serves all three inference tiers.
+  "ai": { "binding": "AI" },
+
+  // R2: content-addressed packfiles and LFS objects.
+  "r2_buckets": [{ "binding": "R2", "bucket_name": "gitvise-blobs" }],
+
+  // Vectorize: cross-agent trajectory memory. Create it with the cosine metric:
+  //   wrangler vectorize create gitvise-memory --dimensions=1024 --metric=cosine
+  //   wrangler vectorize create-metadata-index gitvise-memory --property-name=kind --type=string
+  "vectorize": [{ "binding": "VECTORIZE", "index_name": "gitvise-memory" }],
+
+  // D1: commit-to-packfile index and billing. Schema lives in ./migrations (applied in filename order).
+  "d1_databases": [
+    {
+      "binding": "D1",
+      "database_name": "gitvise",
+      "database_id": "REPLACE_ME",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // KV: deployment config and cached per-tenant settings.
+  "kv_namespaces": [{ "binding": "KV", "id": "REPLACE_ME" }],
+
+  // Workflows: one instance per swarm flow.
+  "workflows": [
+    {
+      "binding": "WORKFLOWS",
+      "name": "gitvise-swarm-flow",
+      "class_name": "SwarmFlowWorkflow"
+    }
+  ],
+
+  // Queues: swarm step messages. Failed messages go to the dead-letter queue.
+  "queues": {
+    "producers": [{ "binding": "QUEUES", "queue": "gitvise-swarm-tasks" }],
+    "consumers": [
+      {
+        "queue": "gitvise-swarm-tasks",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "gitvise-swarm-tasks-dlq"
+      }
+    ]
+  },
+
+  // Containers: one sandbox per lease. Requires a paid Workers plan.
+  // instance_type standard-2 = 1 vCPU / 6 GiB. Keep SANDBOX_CAPACITY in src/composition.ts in step with it.
+  "containers": [
+    {
+      "class_name": "GitViseSandbox",
+      "image": "./Dockerfile",
+      "max_instances": 20,
+      "instance_type": "standard-2"
+    }
+  ],
+
+  // Durable Objects. CONTAINERS is the sandbox namespace. BILLING_GUARD is the single writer for credit balances.
+  "durable_objects": {
+    "bindings": [
+      { "name": "CONTAINERS", "class_name": "GitViseSandbox" },
+      { "name": "SWARM_FLOWS", "class_name": "SwarmFlowState" },
+      { "name": "WORKTREE_MUTEX", "class_name": "WorktreeMutex" },
+      { "name": "REALTIME_ROOMS", "class_name": "RealtimeRoom" },
+      { "name": "BILLING_GUARD", "class_name": "BillingGuardDurableObject" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GitViseSandbox", "SwarmFlowState", "WorktreeMutex", "RealtimeRoom"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["BillingGuardDurableObject"]
+    }
+  ],
+
+  // Cron: billing reconciliation (see src/billing/reconcile.ts). Every 15 minutes. Idempotent, so overlap is harmless.
+  "triggers": { "crons": ["*/15 * * * *"] },
+
+  // Non-secret config. Secrets are set with `wrangler secret put <NAME>`, never here:
+  //   ARCHITECT_FALLBACK_API_KEY, GATEWAY_API_TOKEN, SESSION_SECRET, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET.
+  // An empty ARCHITECT_FALLBACK_URL disables the external fallback.
+  "vars": {
+    // Workers AI models per tier. Verify each id in the model catalogue before deploy.
+    "AI_MODEL_FAST_3B": "@cf/meta/llama-3.2-3b-instruct",
+    "AI_MODEL_WORKER_7B": "@cf/meta/llama-3.1-8b-instruct-fast",
+    "AI_MODEL_ARCHITECT_30B": "@cf/qwen/qwen2.5-coder-32b-instruct",
+    "ARCHITECT_FALLBACK_URL": "",
+    "ARCHITECT_FALLBACK_MODEL": "",
+
+    // Stripe Checkout. Price ids come from the Stripe dashboard. Empty means that product is not sold.
+    "STRIPE_PRICE_PRO": "",
+    "STRIPE_PRICE_BUSINESS_SEAT": "",
+    "STRIPE_PRICE_ENTERPRISE_SEAT": "",
+    "STRIPE_PRICE_TOPUP_15": "",
+    // Where Checkout returns the customer. Must be an https URL you control.
+    "BILLING_RETURN_URL": ""
+  }
+}
