@@ -30,6 +30,7 @@ import { isPaidTier, PLANS, TOPUP_PACK, type PaidTier } from './billing/plans';
 import { requireOperator, requireOwner, requirePrincipal } from './auth/principal';
 import { authRoutes } from './routes/auth';
 import { keyRoutes } from './routes/keys';
+import { internalRoutes } from './internal/routes';
 import { readJson } from './http';
 import { assertLeaseOwner, forgetLease, recordLeaseOwner, scopeFlowSpec, scopeId, unscopeId } from './tenancy';
 import type { GatewayEnv } from './env';
@@ -91,6 +92,9 @@ app.get('/api/health', (c) => c.json({ ok: true }));
 
 app.route('/api/auth', authRoutes);
 app.route('/api/keys', keyRoutes);
+
+// Container-to-gateway calls. Each request is checked against its gitvise-internal-v1 signature in the sub-router.
+app.route('/internal', internalRoutes);
 
 app.use('/v1/*', requirePrincipal);
 app.use('/api/billing/*', requirePrincipal);

@@ -73,7 +73,7 @@ export function createEdgeServices(env: GatewayEnv): EdgeServices {
     sandbox,
     swarmQueue,
     realtime: new CloudflareDurableRealtimeAdapter(env.REALTIME_ROOMS),
-    vectorMemory: new CloudflareVectorizeAdapter(env.VECTORIZE),
+    vectorMemory: new CloudflareVectorizeAdapter(env.VECTORIZE, env.D1),
     blobStorage: blobs,
     inference: new DirectInferenceDisabled(rawInference),
   });

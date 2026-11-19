@@ -25,7 +25,10 @@
 		{ "pattern": "gitvise.com/api/keys", "zone_name": "gitvise.com" },
 		{ "pattern": "gitvise.com/api/keys/*", "zone_name": "gitvise.com" },
 		{ "pattern": "gitvise.com/api/billing/*", "zone_name": "gitvise.com" },
-		{ "pattern": "gitvise.com/api/webhooks/stripe", "zone_name": "gitvise.com" }
+		{ "pattern": "gitvise.com/api/webhooks/stripe", "zone_name": "gitvise.com" },
+		// Custom hostname for gitvise-web's GITSTRAND_API_URL. Worker-to-Worker fetches to the workers.dev URL do
+		// not reach this Worker from gitvise-web, so the web proxy calls this hostname instead.
+		{ "pattern": "api.gitvise.com", "custom_domain": true, "zone_name": "gitvise.com" }
 	],
 	"observability": {
 		"enabled": true,

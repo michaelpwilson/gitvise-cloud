@@ -21,6 +21,7 @@ export const TEST_SECRETS = {
   SESSION_SECRET: 'test-session-secret-0123456789abcdef0123456789',
   GATEWAY_API_TOKEN: 'gateway-token-test',
   STRIPE_WEBHOOK_SECRET: 'whsec_test_secret',
+  INTERNAL_GATEWAY_SECRET: 'internal-gateway-secret-test-0123456789abcdef',
 } as const;
 
 /**

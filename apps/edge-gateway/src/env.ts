@@ -27,6 +27,13 @@ export interface GatewayEnv extends GitViseBindings {
    */
   readonly SESSION_SECRET?: string | undefined;
 
+  /**
+   * Secret. HMAC key for `gitvise-internal-v1` requests from the apps/api container under `/internal/*`. It must
+   * match the container's `INTERNAL_GATEWAY_SECRET`. Without it, every internal route refuses. Set with
+   * `wrangler secret put INTERNAL_GATEWAY_SECRET`.
+   */
+  readonly INTERNAL_GATEWAY_SECRET?: string | undefined;
+
   /** Secret. Stripe API key used for Checkout sessions. */
   readonly STRIPE_SECRET_KEY?: string | undefined;
   /** Secret. Signing secret for webhook endpoints (`whsec_...`). Without it, the webhook route refuses everything. */
