@@ -1,10 +1,17 @@
 import { Hono, type Context } from 'hono';
-import { setCookie } from 'hono/cookie';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { GitViseError } from '@gitvise/core';
 import type { AppEnv } from '../app-env';
 import { hashPassword, randomHex, signToken, verifyPassword } from '../crypto';
 import { emailValue, isUniqueViolation, passwordValue, readJson } from '../http';
-import { roleFor, SESSION_COOKIE, SESSION_TTL_SECONDS } from '../auth/principal';
+import {
+  requirePrincipal,
+  roleFor,
+  SESSION_COOKIE,
+  SESSION_COOKIE_ATTRIBUTES,
+  SESSION_TTL_SECONDS,
+  sessionIdFromCookie,
+} from '../auth/principal';
 import type { Role } from '../auth/types';
 
 /**
@@ -69,6 +76,37 @@ authRoutes.post('/login', async (c) => {
   return c.json({ orgId: user.org_id, userId: user.id, role });
 });
 
+/**
+ * Who the caller is. Accepts a session cookie or an API key, so the dashboard's auth guard and the CLI can both
+ * ask. The email comes from the users row, because sessions and keys carry only ids.
+ */
+authRoutes.get('/me', requirePrincipal, async (c) => {
+  const principal = c.get('principal');
+  const row = await c.env.D1.prepare('SELECT email FROM users WHERE id = ?1 AND org_id = ?2')
+    .bind(principal.userId, principal.orgId)
+    .first<{ email: string }>();
+  // A valid session for a user who no longer exists is not a signed-in user.
+  if (row === null) return c.json({ error: { code: 'UNAUTHORIZED', message: 'sign in or present a valid API key' } }, 401);
+
+  c.header('cache-control', 'no-store');
+  return c.json({ userId: principal.userId, orgId: principal.orgId, email: row.email, role: principal.role });
+});
+
+/**
+ * Ends the caller's dashboard session on the server, then clears the cookie. Public and idempotent: it succeeds with
+ * or without a session, so a stale browser can always sign out. Only a correctly signed cookie can revoke anything,
+ * so a stranger cannot sign out someone else.
+ */
+authRoutes.post('/logout', async (c) => {
+  const sid = await sessionIdFromCookie(c.env, getCookie(c, SESSION_COOKIE));
+  if (sid !== undefined) {
+    await c.env.D1.prepare('UPDATE sessions SET revoked_at = unixepoch() WHERE id = ?1 AND revoked_at IS NULL').bind(sid).run();
+  }
+  deleteCookie(c, SESSION_COOKIE, SESSION_COOKIE_ATTRIBUTES);
+  c.header('cache-control', 'no-store');
+  return c.body(null, 204);
+});
+
 /** The HMAC key for sessions. Undefined when unset, so sign-in refuses rather than issuing unverifiable tokens. */
 function sessionSecret(c: Context<AppEnv>): string | undefined {
   const secret = c.env.SESSION_SECRET ?? '';
@@ -79,20 +117,19 @@ function unconfigured(c: Context<AppEnv>): Response {
   return c.json({ error: { code: 'UNCONFIGURED', message: 'SESSION_SECRET is not set' } }, 503);
 }
 
+/** Records a session row, then sets a cookie that points at it. The row is what makes the session valid. */
 async function startSession(
   c: Context<AppEnv>,
   secret: string,
   claims: { readonly userId: string; readonly orgId: string; readonly role: Role },
 ): Promise<void> {
+  const sid = `ses-${randomHex(16)}`;
   const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
-  const token = await signToken({ sub: claims.userId, org: claims.orgId, role: claims.role, exp }, secret);
-  setCookie(c, SESSION_COOKIE, token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'Lax',
-    path: '/',
-    maxAge: SESSION_TTL_SECONDS,
-  });
+  await c.env.D1.prepare('INSERT INTO sessions (id, user_id, org_id, role, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)')
+    .bind(sid, claims.userId, claims.orgId, claims.role, exp)
+    .run();
+  const token = await signToken({ sid, sub: claims.userId, org: claims.orgId, role: claims.role, exp }, secret);
+  setCookie(c, SESSION_COOKIE, token, { ...SESSION_COOKIE_ATTRIBUTES, maxAge: SESSION_TTL_SECONDS });
 }
 
 let decoy: Promise<string> | undefined;

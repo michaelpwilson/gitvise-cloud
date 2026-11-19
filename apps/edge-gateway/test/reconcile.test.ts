@@ -115,7 +115,8 @@ describe('billing reconciliation', () => {
     worker.scheduled(controller, httpEnv(), ctx);
     await Promise.all(pending);
 
-    expect(pending).toHaveLength(1);
+    // Two background jobs: session pruning, then reconciliation.
+    expect(pending).toHaveLength(2);
     expect(await usageRows(orgId)).toBe(1);
     expect((await testEnv.BILLING_GUARD.getByName(orgId).status()).outboxDepth).toBe(0);
   });

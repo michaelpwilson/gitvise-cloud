@@ -220,7 +220,7 @@ describe('API keys', () => {
     expect(response.status).toBe(401);
   });
 
-  it('a revoked key stops working at once, even while it is cached', async () => {
+  it('a revoked key stops working on the very next request', async () => {
     const account = await registerAccount(env);
     const key = await mintKey(env, account);
     expect((await app.request('/api/billing/status', { headers: bearer(key.key) }, env)).status).toBe(200);

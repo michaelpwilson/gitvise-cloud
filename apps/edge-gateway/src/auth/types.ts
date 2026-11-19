@@ -11,19 +11,16 @@ export interface Principal {
 
 export type Role = 'owner' | 'member';
 
-/** Claims carried inside a dashboard session token. */
+/**
+ * Claims carried inside a dashboard session token. The token is only a pointer: `sid` names a row in `sessions`,
+ * and that row decides whether the session is still valid.
+ */
 export interface SessionClaims {
+  /** Session id. Must match an unrevoked, unexpired row in `sessions`. */
+  readonly sid: string;
   readonly sub: string;
   readonly org: string;
   readonly role: Role;
   /** Unix seconds. */
   readonly exp: number;
-}
-
-/** What the key cache stores. The raw key is never cached, only the identity it resolves to. */
-export interface CachedKey {
-  readonly orgId: string;
-  readonly userId: string;
-  readonly role: Role;
-  readonly keyId: string;
 }

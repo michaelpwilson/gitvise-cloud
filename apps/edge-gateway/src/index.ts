@@ -8,6 +8,7 @@ import { createEdgeServices } from './composition';
 import type { GatewayEnv } from './env';
 import { createBaselineHandlers } from './swarm/handlers';
 import { reconcileBilling } from './billing/reconcile';
+import { pruneExpiredSessions } from './auth/sessions';
 
 // Classes wrangler binds by name. They must be exported from the entry module.
 export {
@@ -39,6 +40,11 @@ export default {
    * failed to write. The run is idempotent, so an overlapping or retried invocation is harmless.
    */
   scheduled(_controller: ScheduledController, env: GatewayEnv, ctx: ExecutionContext): void {
+    ctx.waitUntil(
+      pruneExpiredSessions(env.D1).catch((error: unknown) => {
+        console.error(`session pruning failed: ${error instanceof Error ? error.message : String(error)}`);
+      }),
+    );
     ctx.waitUntil(
       reconcileBilling(env).then(
         (report) => {
