@@ -27,7 +27,8 @@ import { applyStripeEvent, HANDLED_STRIPE_EVENTS } from './billing/webhooks';
 import { reconcileBilling } from './billing/reconcile';
 import { createCheckoutSession, verifyStripeSignature, type StripeEvent } from './billing/stripe';
 import { isPaidTier, PLANS, TOPUP_PACK, type PaidTier } from './billing/plans';
-import { requireOperator, requireOwner, requirePrincipal } from './auth/principal';
+import { refuseCrossSiteWrite, requireOperator, requireOwner, requirePrincipal, resolvePrincipal } from './auth/principal';
+import { GATEWAY_IDENTITY_HEADERS, setGatewayIdentity } from './auth/gateway-identity';
 import { authRoutes } from './routes/auth';
 import { keyRoutes } from './routes/keys';
 import { internalRoutes } from './internal/routes';
@@ -483,7 +484,7 @@ app.post('/api/admin/reconcile', async (c) => {
 // gateway's own container-facing surface, and `/api/admin` is operator-only. Neither is ever forwarded.
 const NEVER_FORWARDED = /^\/+(?:internal|api\/admin)(?:\/|$)/i;
 
-app.all('*', (c) => {
+app.all('*', async (c) => {
   const incoming = new URL(c.req.url);
   if (NEVER_FORWARDED.test(incoming.pathname)) {
     return c.json({ error: { code: 'NOT_FOUND', message: 'no such route' } }, 404);
@@ -494,6 +495,27 @@ app.all('*', (c) => {
   headers.delete('host');
   headers.set('x-forwarded-host', incoming.host);
   headers.set('x-forwarded-proto', incoming.protocol.replace(':', ''));
+
+  // The container trusts only identity this gateway signs. A signed-in browser session, or a tenant API key, gets
+  // its identity attached here. Any other caller is forwarded with no identity, and the container checks its own
+  // bearer token (for example a personal access token used by Git). A caller's identity headers are never kept.
+  const principal = await resolvePrincipal(c);
+  if (principal !== undefined) {
+    const refusal = refuseCrossSiteWrite(c, principal);
+    if (refusal !== undefined) return refusal;
+    const secret = c.env.INTERNAL_GATEWAY_SECRET ?? '';
+    if (secret === '') return unconfigured(c, 'INTERNAL_GATEWAY_SECRET is not set');
+    await setGatewayIdentity(headers, secret, {
+      method: c.req.method,
+      path: incoming.pathname,
+      userId: principal.userId,
+      orgId: principal.orgId,
+      timestamp: Date.now(),
+    });
+  } else {
+    for (const name of GATEWAY_IDENTITY_HEADERS) headers.delete(name);
+  }
+
   const hasBody = c.req.method !== 'GET' && c.req.method !== 'HEAD';
   const forwarded = new Request(incoming, {
     method: c.req.method,

@@ -125,7 +125,7 @@ export const requireSession: MiddlewareHandler<AppEnv> = async (c, next) => {
  * Cookie-authenticated writes must be JSON. A cross-site form cannot send that content type, which closes the CSRF
  * path even if a browser were to send the cookie. Bearer callers are not affected: they never send cookies.
  */
-function refuseCrossSiteWrite(c: Context<AppEnv>, principal: Principal): Response | undefined {
+export function refuseCrossSiteWrite(c: Context<AppEnv>, principal: Principal): Response | undefined {
   if (principal.via === 'session' && isWrite(c.req.method) && !isJson(c.req.header('content-type'))) {
     return c.json({ error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'session writes must be application/json' } }, 415);
   }

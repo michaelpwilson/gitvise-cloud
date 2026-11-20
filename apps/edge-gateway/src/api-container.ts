@@ -13,6 +13,9 @@ export const API_CONTAINER_PORT = 3000;
  */
 export const API_CONTAINER_INSTANCE = 'api';
 
+/** Where the health daemon in the apps/api container serves its metrics. Keep it in step with start-container.sh. */
+export const API_CONTAINER_HEALTH_METRICS_URL = 'http://127.0.0.1:9464/metrics';
+
 /**
  * The apps/api container, built from ../gitvise/apps/api/Dockerfile (see `containers` in wrangler.jsonc).
  *
@@ -31,6 +34,8 @@ export class GitViseApiContainer extends Container<GatewayEnv> {
       GITVISE_RUNTIME: 'cloudflare',
       CLOUDFLARE_GATEWAY_URL: env.CLOUDFLARE_GATEWAY_URL ?? '',
       INTERNAL_GATEWAY_SECRET: env.INTERNAL_GATEWAY_SECRET ?? '',
+      // gitvise-healthd runs beside apps/api in this container (start-container.sh), on this port.
+      NATIVE_CORE_HEALTH_METRICS_URL: API_CONTAINER_HEALTH_METRICS_URL,
     };
   }
 }
