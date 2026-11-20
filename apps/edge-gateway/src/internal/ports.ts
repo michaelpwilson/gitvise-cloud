@@ -9,6 +9,10 @@ import {
   type RealtimeEvent,
   type SandboxExecRequest,
   type SandboxLeaseRequest,
+  type SandboxSource,
+  type SandboxSpec,
+  SNAPSHOT_ID_PATTERN,
+  snapshotKey,
   type SwarmFlowSpec,
   type SwarmStepStatus,
   type WorktreeMutexLease,
@@ -42,6 +46,13 @@ import {
 
 const MAX_SANDBOX_COMMAND = 64;
 const MAX_SANDBOX_ARG_CHARS = 4_096;
+const MAX_SANDBOX_ENV_CHARS = 4_096;
+const MAX_SANDBOX_IMAGE_CHARS = 128;
+const MAX_SANDBOX_VCPUS = 64;
+const MAX_SANDBOX_MEMORY_MIB = 65_536;
+const MAX_SNAPSHOT_ID_CHARS = 128;
+/** A git object id: SHA-1 (40 hex) or SHA-256 (64 hex). The same rule the container adapter applies. */
+const GIT_OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const MAX_TIMEOUT_MS = 60 * 60 * 1000;
 const MAX_BLOB_BYTES = 8 * 1024 * 1024 * 1024;
 const BLOB_BYTE_HEADER = 'x-gitvise-blob-byte-length';
@@ -101,6 +112,26 @@ portRoutes.post('/ports/inference/embed', async (c) => {
     userId: request.billing.userId,
   });
   return c.json({ vectors });
+});
+
+// Snapshots. The API records a commit it has pushed to R2, so a later sandbox can hydrate it. The packfile must be
+// uploaded first, as on the tenant route, so no commit points at a missing blob. The row is keyed `orgId:repoId`, the
+// same key the swarm commit-patch path writes and the sandbox routes read.
+
+portRoutes.post('/ports/snapshots', async (c) => {
+  const body = objectBody(await readJson<unknown>(c.req.raw));
+  const key = snapshotKeyOf(body);
+  const commitHash = commitHashOf(body['commitHash']);
+  const sha256 = stringField(body['sha256'], 'sha256', 64, 64);
+  if (!SHA256_HEX.test(sha256)) throw invalid('sha256 must be a 64-character hex digest');
+  const parentHash = body['parentHash'] === undefined || body['parentHash'] === null ? null : commitHashOf(body['parentHash']);
+
+  const { snapshots, blobs } = createEdgeServices(c.env);
+  const info = await blobs.headBlob({ kind: 'packfile', sha256 });
+  if (info === undefined) return c.json({ code: 'NOT_FOUND', message: 'upload the packfile before recording a snapshot' }, 404);
+
+  const outcome = await snapshots.record(key, commitHash, sha256, parentHash);
+  return c.json({ outcome }, outcome === 'created' ? 201 : 200);
 });
 
 // Sandbox. Runs go to the container adapter. A lease is addressed by its id, and a missing lease answers 404.
@@ -251,16 +282,79 @@ function blobHeaders(info: BlobInfo): Headers {
   });
 }
 
+/**
+ * An exec request as the API's `CloudSandboxPort` sends it: the commit to hydrate (`orgId`, `repoId`, `commitHash`),
+ * the sandbox spec, the argv, and the run's limits. Every field is checked here, so a malformed request is a 400 at the
+ * route, not a failure deeper in the adapter.
+ */
 function sandboxExecOf(body: Record<string, unknown>): SandboxExecRequest {
-  const command = argvOf(body['command']);
-  const timeoutMs = intField(body['timeoutMs'], 'timeoutMs', 1, MAX_TIMEOUT_MS);
-  // The remaining fields are the adapter's contract (SandboxSpec, SandboxSource, env). The adapter validates them.
-  return { ...(body as unknown as SandboxExecRequest), command, timeoutMs };
+  return {
+    sandbox: sandboxSpecOf(objectBody(body['sandbox'], 'sandbox')),
+    ...sourceOf(body),
+    command: argvOf(body['command']),
+    timeoutMs: intField(body['timeoutMs'], 'timeoutMs', 1, MAX_TIMEOUT_MS),
+    env: envOf(body['env']),
+  };
 }
 
 function sandboxLeaseOf(body: Record<string, unknown>): SandboxLeaseRequest {
+  const spec = sandboxSpecOf(body);
   const timeoutMs = intField(body['timeoutMs'], 'timeoutMs', 1, MAX_TIMEOUT_MS);
-  return { ...(body as unknown as SandboxLeaseRequest), timeoutMs };
+  const env = envOf(body['env']);
+  // A lease hydrates a commit only when the caller names one. Without it the sandbox starts empty.
+  if (body['source'] === undefined) return { ...spec, timeoutMs, env };
+  return { ...spec, timeoutMs, env, source: sourceOf(objectBody(body['source'], 'source')) };
+}
+
+/** The image, vCPU, and memory the caller wants. `network` is not read here: the adapter always runs with none. */
+function sandboxSpecOf(body: Record<string, unknown>): SandboxSpec {
+  return {
+    image: stringField(body['image'], 'sandbox.image', MAX_SANDBOX_IMAGE_CHARS),
+    vcpus: intField(body['vcpus'], 'sandbox.vcpus', 1, MAX_SANDBOX_VCPUS),
+    memoryMiB: intField(body['memoryMiB'], 'sandbox.memoryMiB', 128, MAX_SANDBOX_MEMORY_MIB),
+  };
+}
+
+/**
+ * The commit a sandbox hydrates from, located by `orgId:repoId`. That is the key the swarm `commit-patch` path stores
+ * its snapshots under, so a commit the API registers and a commit a worker writes share one namespace. The returned
+ * `repoId` is already that key, which is what the container adapter looks the snapshot up by.
+ */
+function sourceOf(body: Record<string, unknown>): SandboxSource {
+  return {
+    repoId: snapshotKeyOf(body),
+    commitHash: commitHashOf(body['commitHash']),
+  };
+}
+
+/**
+ * `orgId:repoId` from a body's `orgId` and `repoId`. Both parts must be plain identifiers with no colon, so the key
+ * splits back into exactly two parts and two different (org, repo) pairs can never share one.
+ */
+function snapshotKeyOf(body: Record<string, unknown>): string {
+  return snapshotKey(snapshotIdOf(body['orgId'], 'orgId'), snapshotIdOf(body['repoId'], 'repoId'));
+}
+
+function snapshotIdOf(value: unknown, label: string): string {
+  const id = stringField(value, label, MAX_SNAPSHOT_ID_CHARS);
+  if (!SNAPSHOT_ID_PATTERN.test(id)) throw invalid(`${label} must start with a letter or digit and use only letters, digits, _ and -`);
+  return id;
+}
+
+function commitHashOf(value: unknown): string {
+  const hash = stringField(value, 'commitHash', 64, 40);
+  if (!GIT_OBJECT_ID.test(hash)) throw invalid('commitHash must be a git object id');
+  return hash;
+}
+
+function envOf(value: unknown): Record<string, string> {
+  if (value === undefined) return {};
+  const entries = objectBody(value, 'env');
+  const env: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(entries)) {
+    env[key] = stringField(entry, `env.${key}`, MAX_SANDBOX_ENV_CHARS, 0);
+  }
+  return env;
 }
 
 function argvOf(value: unknown): string[] {

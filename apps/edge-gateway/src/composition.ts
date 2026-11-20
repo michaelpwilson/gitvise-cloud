@@ -13,8 +13,11 @@ import type { GatewayEnv } from './env';
 import { DirectInferenceDisabled, MeteredInferenceDecorator } from './billing/metered-inference';
 import { recordUsage } from './billing/ledger';
 
-/** The one sandbox image this deployment builds (see ./Dockerfile). */
-export const SANDBOX_IMAGE = 'gitvise-sandbox';
+/**
+ * The one sandbox image this deployment builds (see ./Dockerfile). The name matches the image the API asks for in its
+ * CI runner and its linear verifier, so those requests resolve here without a per-caller alias.
+ */
+export const SANDBOX_IMAGE = 'gitvise-ci-default';
 
 /**
  * Size of the container instance type in wrangler.jsonc. `standard-2` is 1 vCPU and 6 GiB.

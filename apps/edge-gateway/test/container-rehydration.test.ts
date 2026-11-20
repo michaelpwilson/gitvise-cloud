@@ -7,7 +7,7 @@ const REPO = 'repo-demo';
 const COMMIT = 'a'.repeat(40);
 const PACK_SHA = 'b'.repeat(64);
 const SANDBOX = {
-  image: 'gitvise-sandbox',
+  image: 'gitvise-ci-default',
   vcpus: 1,
   memoryMiB: 1024,
   network: 'none' as const,

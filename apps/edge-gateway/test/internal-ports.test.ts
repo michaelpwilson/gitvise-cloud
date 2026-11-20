@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { app } from '../src/app';
+import { SANDBOX_IMAGE } from '../src/composition';
 import { FakeBlobs, FakeContainerNamespace } from './support/fake-container';
 import { httpEnv, testEnv, uniqueId } from './support/bindings';
 import { callInternalWith, signedHeaders, signedStreamHeaders } from './support/internal';
@@ -178,14 +179,14 @@ describe('/internal/ports/inference', () => {
 });
 
 describe('/internal/ports/sandbox', () => {
-  const SANDBOX = { image: 'gitvise-sandbox', vcpus: 1, memoryMiB: 1024, network: 'none' as const, timeoutMs: 600_000 };
+  const SANDBOX = { image: SANDBOX_IMAGE, vcpus: 1, memoryMiB: 1024, network: 'none' as const, timeoutMs: 600_000 };
 
   it('refuses an exec against a commit the gateway has no snapshot for', async () => {
     const containers = new FakeContainerNamespace(new FakeBlobs());
     const env = httpEnv({ CONTAINERS: containers.asNamespace() as unknown as GatewayEnv['CONTAINERS'] });
     const exec = await callInternalWith('POST', '/internal/ports/sandbox/exec', {
       env,
-      payload: { sandbox: SANDBOX, repoId: 'repo-demo', commitHash: 'a'.repeat(40), command: ['echo', 'hi'], timeoutMs: 5_000, env: {} },
+      payload: { sandbox: SANDBOX, orgId: 'org-demo', repoId: 'repo-demo', commitHash: 'a'.repeat(40), command: ['echo', 'hi'], timeoutMs: 5_000, env: {} },
     });
     expect(exec.status).toBe(404);
   });

@@ -45,6 +45,11 @@ USER node
 WORKDIR /workspace
 EXPOSE 8080
 
+# The sandbox has no network and no install step, so the toolchain a cloud agent's verifier runs must be baked in.
+# `tsc --noEmit` is the verifier's check. The TypeScript version tracks the monorepo's pin (~6.0.3).
+RUN npm install -g --no-audit --no-fund typescript@~6.0.3 pnpm@10 \
+ && npm cache clean --force
+
 # tini reaps the zombie processes that sandboxed commands leave behind.
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "/opt/gitvise/agent.mjs"]
