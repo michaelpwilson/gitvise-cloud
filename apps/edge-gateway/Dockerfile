@@ -41,14 +41,15 @@ COPY container/agent.mjs /opt/gitvise/agent.mjs
 RUN mkdir -p /workspace /var/gitvise \
  && chown -R node:node /workspace /var/gitvise
 
+# The sandbox has no network and no install step, so the toolchain a cloud agent's verifier runs must be baked in.
+# `tsc --noEmit` is the verifier's check. The TypeScript version tracks the monorepo's pin (~6.0.3).
+# Installed as root: the node user cannot write to the global npm prefix (/usr/local/lib/node_modules).
+RUN npm install -g --no-audit --no-fund typescript@~6.0.3 pnpm@10 \
+ && npm cache clean --force
+
 USER node
 WORKDIR /workspace
 EXPOSE 8080
-
-# The sandbox has no network and no install step, so the toolchain a cloud agent's verifier runs must be baked in.
-# `tsc --noEmit` is the verifier's check. The TypeScript version tracks the monorepo's pin (~6.0.3).
-RUN npm install -g --no-audit --no-fund typescript@~6.0.3 pnpm@10 \
- && npm cache clean --force
 
 # tini reaps the zombie processes that sandboxed commands leave behind.
 ENTRYPOINT ["/usr/bin/tini", "--"]
