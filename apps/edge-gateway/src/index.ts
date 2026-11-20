@@ -9,6 +9,8 @@ import type { GatewayEnv } from './env';
 import { createBaselineHandlers } from './swarm/handlers';
 import { reconcileBilling } from './billing/reconcile';
 import { pruneExpiredSessions } from './auth/sessions';
+import { deliverApiJobs, API_JOBS_QUEUE } from './queues/api-jobs';
+import type { ApiJobMessage } from './queues/api-job-message';
 
 // Classes wrangler binds by name. They must be exported from the entry module.
 export {
@@ -19,12 +21,18 @@ export {
   WorktreeMutex,
 } from '@gitvise/adapter-cloudflare';
 export { BillingGuardDurableObject } from './billing/billing-guard';
+export { GatewayKvEntry } from './kv/gateway-kv-entry';
+export { GitViseApiContainer } from './api-container';
 
 export default {
   fetch: app.fetch,
 
   async queue(batch: MessageBatch<unknown>, env: GatewayEnv): Promise<void> {
-    // This queue carries only messages written by SwarmFlowWorkflow, so the cast is safe for this deployment.
+    if (batch.queue === API_JOBS_QUEUE) {
+      await deliverApiJobs(batch as MessageBatch<ApiJobMessage>, env);
+      return;
+    }
+    // Every other queue on this Worker is the swarm queue, which carries only SwarmFlowWorkflow messages.
     const services = createEdgeServices(env);
     const handlers: Readonly<Record<string, SwarmTaskHandler>> = createBaselineHandlers(services);
     await createSwarmTaskConsumer({

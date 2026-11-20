@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import * as Y from 'yjs';
-import type { AgentCursorPresence } from '@gitvise/core';
+import type { AgentCursorPresence, AgentRealtimeEvent } from '@gitvise/core';
 import { fromBase64, toArrayBuffer, toBase64 } from '../shared/bytes';
 
 /** Compact the update log once it grows past this many rows. Keeps replay cheap for late joiners. */
@@ -10,7 +10,8 @@ const MAX_UPDATE_BYTES = 1_048_576;
 /** Frames sent to subscribers as text WebSocket messages. */
 export type RoomFrame =
   | { readonly type: 'yjs-update'; readonly origin: string; readonly update: string }
-  | { readonly type: 'presence'; readonly presence: AgentCursorPresence };
+  | { readonly type: 'presence'; readonly presence: AgentCursorPresence }
+  | { readonly type: 'agent'; readonly event: AgentRealtimeEvent };
 
 interface UpdateRow {
   readonly origin: string;
@@ -58,6 +59,9 @@ export class RealtimeRoom extends DurableObject<unknown> {
     }
     if (url.pathname === '/presence' && request.method === 'POST') {
       return this.acceptPresence(request);
+    }
+    if (url.pathname === '/agent' && request.method === 'POST') {
+      return this.acceptAgentEvent(request);
     }
     return new Response('not found', { status: 404 });
   }
@@ -120,6 +124,22 @@ export class RealtimeRoom extends DurableObject<unknown> {
       return new Response('presence is malformed', { status: 400 });
     }
     this.broadcast({ type: 'presence', presence });
+    return new Response(null, { status: 204 });
+  }
+
+  /**
+   * Agent stream and state events are relayed, never stored. A subscriber that joins late sees only what is
+   * published after it joins, so a reader that needs the full transcript reads it from the run's record.
+   */
+  private async acceptAgentEvent(request: Request): Promise<Response> {
+    const event = (await request.json()) as Partial<AgentRealtimeEvent>;
+    if (typeof event.runId !== 'string' || event.runId === '') {
+      return new Response('runId is required', { status: 400 });
+    }
+    if (event.type !== 'stream-chunk' && event.type !== 'stream-close' && event.type !== 'state') {
+      return new Response('agent event type is not recognised', { status: 400 });
+    }
+    this.broadcast({ type: 'agent', event: event as AgentRealtimeEvent });
     return new Response(null, { status: 204 });
   }
 

@@ -1,5 +1,8 @@
 import type { GitViseBindings } from '@gitvise/adapter-cloudflare';
 import type { BillingGuardDurableObject } from './billing/billing-guard';
+import type { GitViseApiContainer } from './api-container';
+import type { GatewayKvEntry } from './kv/gateway-kv-entry';
+import type { ApiJobMessage } from './queues/api-job-message';
 
 /**
  * Everything the gateway Worker is bound to. `GitViseBindings` covers the adapter bindings. This adds the
@@ -15,6 +18,23 @@ export interface GatewayEnv extends GitViseBindings {
   readonly KV: KVNamespace;
   /** Single writer for each organisation's live credit balance, addressed by org id. */
   readonly BILLING_GUARD: DurableObjectNamespace<BillingGuardDurableObject>;
+  /**
+   * One Durable Object per key, for `/internal/kv/*`. Atomic `ifAbsent`, counters, and expiry need a single writer per
+   * key, which Workers KV cannot give.
+   */
+  readonly KV_ENTRIES: DurableObjectNamespace<GatewayKvEntry>;
+  /** Queue for jobs the apps/api container runs. The gateway's consumer delivers each one to `GitViseApiContainer`. */
+  readonly API_JOBS: Queue<ApiJobMessage>;
+  /**
+   * The apps/api container. Every request the gateway does not own, and every queue delivery, goes to its single
+   * instance (`API_CONTAINER_INSTANCE`). See ./api-container.ts.
+   */
+  readonly GitViseApiContainer: DurableObjectNamespace<GitViseApiContainer>;
+  /**
+   * Public origin of this gateway, with no trailing slash. apps/api calls the gateway's `/internal/*` routes here, so
+   * it must reach this Worker. Plain var in wrangler.jsonc.
+   */
+  readonly CLOUDFLARE_GATEWAY_URL?: string | undefined;
 
   /**
    * Secret. Operator key for internal jobs only (manual reconciliation under `/api/admin/*`). It is never a tenant

@@ -82,7 +82,7 @@ function mirrorBalances(db: D1Database, orgId: string, monthlyPence: number, top
   return db
     .prepare(
       `UPDATE organizations
-          SET monthly_credits_remaining_pence = ?, topup_credits_remaining_pence = ?, updated_at = unixepoch()
+          SET monthly_credits_remaining_pence = ?, topup_credits_remaining_pence = ?, updated_at = unixepoch() * 1000
         WHERE id = ?`,
     )
     .bind(monthlyPence, topupPence, orgId);
@@ -132,7 +132,7 @@ export async function applyPlan(
       `UPDATE organizations
           SET tier = ?, seats = ?,
               stripe_customer_id = COALESCE(?, stripe_customer_id),
-              saml_sso_enabled = ?, b4_audit_log_enabled = ?, updated_at = unixepoch()
+              saml_sso_enabled = ?, b4_audit_log_enabled = ?, updated_at = unixepoch() * 1000
         WHERE id = ?`,
     )
     .bind(input.tier, input.seats, input.stripeCustomerId, input.samlSso ? 1 : 0, input.b4AuditLog ? 1 : 0, input.orgId)
@@ -144,7 +144,7 @@ export async function clearPlan(db: D1Database, orgId: string): Promise<void> {
   await db
     .prepare(
       `UPDATE organizations
-          SET tier = 'none', saml_sso_enabled = 0, b4_audit_log_enabled = 0, updated_at = unixepoch()
+          SET tier = 'none', saml_sso_enabled = 0, b4_audit_log_enabled = 0, updated_at = unixepoch() * 1000
         WHERE id = ?`,
     )
     .bind(orgId)

@@ -31,6 +31,8 @@ export interface EdgeServices {
   readonly blobs: CloudflareR2BlobStorageAdapter;
   /** The only way to run inference. Every call reserves credit and settles it on the final usage event. */
   readonly metered: MeteredInferenceDecorator;
+  /** The room adapter itself, with agent events. The engine's realtime service wraps it and omits those. */
+  readonly realtime: CloudflareDurableRealtimeAdapter;
 }
 
 /**
@@ -55,9 +57,11 @@ export function createEdgeServices(env: GatewayEnv): EdgeServices {
     'worker-7b': env.AI_MODEL_WORKER_7B,
     'architect-30b': env.AI_MODEL_ARCHITECT_30B,
   };
+  const embeddingModel = env.AI_MODEL_EMBED;
   const rawInference = new CloudflareWorkersAiInferenceAdapter({
     ai: env.AI,
     models,
+    embeddingModel,
     fallback,
   });
 
@@ -66,19 +70,21 @@ export function createEdgeServices(env: GatewayEnv): EdgeServices {
     guards: env.BILLING_GUARD,
     externalFallbackConfigured: fallback !== undefined,
     describeModel: (tier, external) => (external ? `external:${fallback?.model ?? ''}` : (models[tier] ?? tier)),
+    embeddingModel,
     onSettled: (record) => recordUsage(env.D1, record),
   });
 
+  const realtime = new CloudflareDurableRealtimeAdapter(env.REALTIME_ROOMS);
   const engine = new GitViseEngine({
     sandbox,
     swarmQueue,
-    realtime: new CloudflareDurableRealtimeAdapter(env.REALTIME_ROOMS),
+    realtime,
     vectorMemory: new CloudflareVectorizeAdapter(env.VECTORIZE, env.D1),
     blobStorage: blobs,
     inference: new DirectInferenceDisabled(rawInference),
   });
 
-  return { engine, sandbox, swarmQueue, snapshots, blobs, metered };
+  return { engine, sandbox, swarmQueue, snapshots, blobs, metered, realtime };
 }
 
 function externalFallback(env: GatewayEnv): ExternalFallback | undefined {

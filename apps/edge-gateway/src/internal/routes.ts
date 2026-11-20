@@ -3,7 +3,10 @@ import { GitViseError } from '@gitvise/core';
 import type { AppEnv } from '../app-env';
 import { readJson } from '../http';
 import { constraintFailure, parseStatement, runBatch, runQuery, type D1WireStatement } from './d1';
-import { verifyInternalSignature } from './signature';
+import { INTERNAL_HEADERS, INTERNAL_MAX_SKEW_MS, STREAMED_BODY, UNSIGNED_PAYLOAD, verifyInternalSignature } from './signature';
+import { kvRoutes } from './kv';
+import { portRoutes } from './ports';
+import { queueRoutes } from './queues';
 import { deleteVectors, queryVectors, upsertVectors } from './vector';
 
 /**
@@ -13,15 +16,26 @@ import { deleteVectors, queryVectors, upsertVectors } from './vector';
 export const internalRoutes = new Hono<AppEnv>();
 
 /**
- * Checks the signature before any route runs. The body is read from a clone, so the handler can still read it. A
- * missing secret refuses everything, so an unconfigured gateway cannot be called.
+ * Blob writes are the only streamed bodies. They are signed as `UNSIGNED-PAYLOAD`, so the gateway never buffers
+ * a packfile. R2 checks the digest in the path while it writes.
+ */
+const STREAMED_ROUTE = /^\/internal\/ports\/blob\/(?:packfile|lfs-object)\/[0-9a-f]{64}$/;
+
+/**
+ * Checks the signature before any route runs, then refuses a nonce the gateway has already seen. A replayed signed
+ * request is therefore refused even inside the skew window. The body is buffered, except for a streamed route, so the
+ * digest can be checked. A missing secret refuses everything, so an unconfigured gateway cannot be called.
  */
 const requireInternal: MiddlewareHandler<AppEnv> = async (c, next) => {
   const secret = c.env.INTERNAL_GATEWAY_SECRET ?? '';
   if (secret === '') {
     return c.json({ code: 'UNCONFIGURED', message: 'internal gateway secret is not configured' }, 503);
   }
-  const body = new Uint8Array(await c.req.raw.clone().arrayBuffer());
+  const streamed = c.req.header(INTERNAL_HEADERS.contentSha256) === UNSIGNED_PAYLOAD;
+  if (streamed && !(c.req.method === 'PUT' && STREAMED_ROUTE.test(c.req.path))) {
+    return c.json({ code: 'UNAUTHORIZED', message: 'signature check failed' }, 401);
+  }
+  const body = streamed ? STREAMED_BODY : new Uint8Array(await c.req.raw.clone().arrayBuffer());
   const url = new URL(c.req.url);
   const ok = await verifyInternalSignature({
     secret,
@@ -31,10 +45,22 @@ const requireInternal: MiddlewareHandler<AppEnv> = async (c, next) => {
     body,
   });
   if (!ok) return c.json({ code: 'UNAUTHORIZED', message: 'signature check failed' }, 401);
+
+  // Claimed after the signature passes, so an unsigned caller cannot fill the nonce table. The claim lasts past
+  // the skew window, so a captured request stays refused for as long as its signature would still verify.
+  const nonce = c.req.header(INTERNAL_HEADERS.nonce) ?? '';
+  const fresh = await c.env.KV_ENTRIES.getByName(`nonce:${nonce}`).put('1', {
+    ifAbsent: true,
+    ttlMs: 2 * INTERNAL_MAX_SKEW_MS,
+  });
+  if (!fresh) return c.json({ code: 'UNAUTHORIZED', message: 'request nonce was already used' }, 401);
   return next();
 };
 
 internalRoutes.use('*', requireInternal);
+internalRoutes.route('/', kvRoutes);
+internalRoutes.route('/', portRoutes);
+internalRoutes.route('/', queueRoutes);
 
 /**
  * A SQLite constraint violation is a client conflict, not a gateway fault. It answers 409 with a top-level

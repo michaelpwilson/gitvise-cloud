@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@cloudflare/containers": "^0.3.7",
     "@gitvise/adapter-cloudflare": "*",
     "@gitvise/core": "file:../../../gitvise/packages/core",
     "hono": "^4.13.19"

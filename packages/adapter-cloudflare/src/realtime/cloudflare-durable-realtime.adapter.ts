@@ -1,6 +1,7 @@
 import {
   GitViseError,
   type AgentCursorPresence,
+  type AgentRealtimeEvent,
   type RealtimeEvent,
   type RealtimeRoomRef,
   type RealtimeSyncPort,
@@ -26,6 +27,10 @@ export class CloudflareDurableRealtimeAdapter implements RealtimeSyncPort {
 
   async publishPresence(room: RealtimeRoomRef, presence: AgentCursorPresence): Promise<void> {
     await this.post(room, '/presence', presence);
+  }
+
+  async publishAgentEvent(room: RealtimeRoomRef, event: AgentRealtimeEvent): Promise<void> {
+    await this.post(room, '/agent', event);
   }
 
   subscribe(room: RealtimeRoomRef): ReadableStream<RealtimeEvent> {
@@ -99,7 +104,9 @@ function parseFrame(data: unknown): RoomFrame | undefined {
   if (typeof data !== 'string') return undefined;
   try {
     const frame = JSON.parse(data) as Partial<RoomFrame>;
-    return frame.type === 'yjs-update' || frame.type === 'presence' ? (frame as RoomFrame) : undefined;
+    return frame.type === 'yjs-update' || frame.type === 'presence' || frame.type === 'agent'
+      ? (frame as RoomFrame)
+      : undefined;
   } catch {
     return undefined;
   }
@@ -108,6 +115,9 @@ function parseFrame(data: unknown): RoomFrame | undefined {
 function toEvent(room: RealtimeRoomRef, frame: RoomFrame): RealtimeEvent {
   if (frame.type === 'presence') {
     return { type: 'presence', room, presence: frame.presence };
+  }
+  if (frame.type === 'agent') {
+    return { type: 'agent', room, event: frame.event };
   }
   return { type: 'yjs-update', room, origin: frame.origin, update: fromBase64(frame.update) };
 }

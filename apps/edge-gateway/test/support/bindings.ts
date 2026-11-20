@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import type { BillingGuardDurableObject } from '../../src/billing/billing-guard';
 import type { GatewayEnv } from '../../src/env';
 import type { RealtimeRoom, SwarmFlowState, WorktreeMutex } from '@gitvise/adapter-cloudflare';
+import type { GatewayKvEntry } from '../../src/kv/gateway-kv-entry';
 
 /** The subset of bindings the test Worker provides. Typed locally so tests do not depend on generated wrangler types. */
 export interface TestBindings {
@@ -12,6 +13,7 @@ export interface TestBindings {
   readonly SWARM_FLOWS: DurableObjectNamespace<SwarmFlowState>;
   readonly REALTIME_ROOMS: DurableObjectNamespace<RealtimeRoom>;
   readonly BILLING_GUARD: DurableObjectNamespace<BillingGuardDurableObject>;
+  readonly KV_ENTRIES: DurableObjectNamespace<GatewayKvEntry>;
 }
 
 export const testEnv = env as unknown as TestBindings;

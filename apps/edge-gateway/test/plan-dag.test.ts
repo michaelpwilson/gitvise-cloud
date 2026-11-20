@@ -9,6 +9,7 @@ import { testEnv, uniqueId } from './support/bindings';
 function modelReplying(reply: string): InferencePort {
   return {
     availableTiers: () => ['fast-3b', 'worker-7b', 'architect-30b'],
+    embed: async () => [],
     stream: () =>
       new ReadableStream<InferenceEvent>({
         start(controller) {

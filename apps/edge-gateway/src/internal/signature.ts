@@ -10,6 +10,10 @@
  * Replay is bounded by the skew window only, which is the same limit the sending side's verifier enforces.
  */
 export const INTERNAL_SIGNATURE_VERSION = 'gitvise-internal-v1';
+/** Sent as the content digest of a streamed body. The receiver checks the digest where the content is addressed. */
+export const UNSIGNED_PAYLOAD = 'UNSIGNED-PAYLOAD';
+/** Passed as `body` when the request body was not buffered, so the digest is not checked here. */
+export const STREAMED_BODY = 'streamed';
 export const INTERNAL_HEADERS = {
   timestamp: 'x-gitvise-internal-timestamp',
   nonce: 'x-gitvise-internal-nonce',
@@ -26,8 +30,11 @@ export interface InternalSignatureInput {
   /** Path plus query, exactly as the sender signed it. */
   readonly pathAndQuery: string;
   readonly headers: Headers;
-  /** The raw request body. Every internal call that carries a body is buffered, so the digest is always checked. */
-  readonly body: Uint8Array;
+  /**
+   * The raw request body, buffered, so the claimed digest is checked against it. `STREAMED_BODY` when the body was
+   * not buffered; then the sender must have signed `UNSIGNED-PAYLOAD`, and the route checks the content itself.
+   */
+  readonly body: Uint8Array | typeof STREAMED_BODY;
   readonly nowMs?: number;
 }
 
@@ -43,9 +50,14 @@ export async function verifyInternalSignature(input: InternalSignatureInput): Pr
   const now = input.nowMs ?? Date.now();
   if (Math.abs(now - Number(timestamp)) > INTERNAL_MAX_SKEW_MS) return false;
 
-  // The digest the sender claims must be the digest of the bytes we actually received.
-  const actualSha = toHex(await crypto.subtle.digest('SHA-256', input.body));
-  if (!constantTimeEqual(actualSha, contentSha)) return false;
+  if (input.body === STREAMED_BODY) {
+    if (contentSha !== UNSIGNED_PAYLOAD) return false;
+  } else {
+    // The digest the sender claims must be the digest of the bytes we actually received.
+    if (contentSha === UNSIGNED_PAYLOAD) return false;
+    const actualSha = toHex(await crypto.subtle.digest('SHA-256', input.body));
+    if (!constantTimeEqual(actualSha, contentSha)) return false;
+  }
 
   const canonical = [
     INTERNAL_SIGNATURE_VERSION,

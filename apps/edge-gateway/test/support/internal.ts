@@ -40,3 +40,43 @@ export async function callInternal(path: string, payload: unknown, env: GatewayE
 function hex(buffer: ArrayBuffer): string {
   return [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
+
+/**
+ * Sends a signed request with any method. A body is JSON when `payload` is given, and absent otherwise. The signature
+ * covers the exact bytes sent, so the same call can be repeated to exercise replay.
+ */
+export async function callInternalWith(
+  method: string,
+  path: string,
+  options: { payload?: unknown; env?: GatewayEnv; headers?: Record<string, string> } = {},
+): Promise<Response> {
+  const body = options.payload === undefined ? '' : JSON.stringify(options.payload);
+  const headers = { ...(await signedHeaders(method, path, body)), ...options.headers };
+  if (body === '') delete headers['content-type'];
+  const init = body === '' ? { method, headers } : { method, headers, body };
+  return app.request(path, init, options.env ?? httpEnv());
+}
+
+/**
+ * Builds the headers for a streamed blob PUT. The digest is `UNSIGNED-PAYLOAD`, so the gateway does not buffer the
+ * body, and the content is checked where it is written.
+ */
+export async function signedStreamHeaders(
+  method: string,
+  path: string,
+  extra: Record<string, string>,
+  secret: string = TEST_SECRETS.INTERNAL_GATEWAY_SECRET,
+): Promise<Record<string, string>> {
+  const timestamp = String(Date.now());
+  const nonce = `nonce-${crypto.randomUUID()}`;
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const canonical = ['gitvise-internal-v1', method, path, 'UNSIGNED-PAYLOAD', timestamp, nonce].join('\n');
+  const signature = hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(canonical)));
+  return {
+    ...extra,
+    [INTERNAL_HEADERS.timestamp]: timestamp,
+    [INTERNAL_HEADERS.nonce]: nonce,
+    [INTERNAL_HEADERS.contentSha256]: 'UNSIGNED-PAYLOAD',
+    [INTERNAL_HEADERS.signature]: signature,
+  };
+}

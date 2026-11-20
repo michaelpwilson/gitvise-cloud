@@ -34,6 +34,7 @@ import { internalRoutes } from './internal/routes';
 import { readJson } from './http';
 import { assertLeaseOwner, forgetLease, recordLeaseOwner, scopeFlowSpec, scopeId, unscopeId } from './tenancy';
 import type { GatewayEnv } from './env';
+import { API_CONTAINER_INSTANCE } from './api-container';
 
 export type { AppEnv } from './app-env';
 
@@ -477,6 +478,31 @@ app.post('/api/admin/reconcile', async (c) => {
   return c.json(await reconcileBilling(c.env, orgIds === undefined ? {} : { orgIds }));
 });
 
+// apps/api owns everything this Worker does not: repositories, issues, pull requests, projects, Git smart HTTP,
+// and MCP. Those requests are forwarded, unchanged, to the one apps/api container instance. `/internal` is the
+// gateway's own container-facing surface, and `/api/admin` is operator-only. Neither is ever forwarded.
+const NEVER_FORWARDED = /^\/+(?:internal|api\/admin)(?:\/|$)/i;
+
+app.all('*', (c) => {
+  const incoming = new URL(c.req.url);
+  if (NEVER_FORWARDED.test(incoming.pathname)) {
+    return c.json({ error: { code: 'NOT_FOUND', message: 'no such route' } }, 404);
+  }
+  if (c.env.GitViseApiContainer === undefined) return unconfigured(c, 'the apps/api container is not bound');
+
+  const headers = new Headers(c.req.raw.headers);
+  headers.delete('host');
+  headers.set('x-forwarded-host', incoming.host);
+  headers.set('x-forwarded-proto', incoming.protocol.replace(':', ''));
+  const hasBody = c.req.method !== 'GET' && c.req.method !== 'HEAD';
+  const forwarded = new Request(incoming, {
+    method: c.req.method,
+    headers,
+    body: hasBody ? c.req.raw.body : null,
+  });
+  return c.env.GitViseApiContainer.getByName(API_CONTAINER_INSTANCE).fetch(forwarded);
+});
+
 interface WireRecord {
   readonly id: string;
   readonly namespace: string;
@@ -613,6 +639,6 @@ async function pump(reader: ReadableStreamDefaultReader<RealtimeEvent>, socket: 
 }
 
 function toWire(event: RealtimeEvent): unknown {
-  if (event.type === 'presence') return event;
+  if (event.type === 'presence' || event.type === 'agent') return event;
   return { type: event.type, room: event.room, origin: event.origin, update: toBase64(event.update) };
 }

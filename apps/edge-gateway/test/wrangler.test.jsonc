@@ -11,7 +11,8 @@
       { "name": "WORKTREE_MUTEX", "class_name": "WorktreeMutex" },
       { "name": "SWARM_FLOWS", "class_name": "SwarmFlowState" },
       { "name": "REALTIME_ROOMS", "class_name": "RealtimeRoom" },
-      { "name": "BILLING_GUARD", "class_name": "BillingGuardDurableObject" }
+      { "name": "BILLING_GUARD", "class_name": "BillingGuardDurableObject" },
+      { "name": "KV_ENTRIES", "class_name": "GatewayKvEntry" }
     ]
   },
   "d1_databases": [{ "binding": "D1", "database_name": "gitvise-test", "database_id": "local-test" }],
@@ -20,7 +21,7 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["WorktreeMutex", "SwarmFlowState", "RealtimeRoom", "BillingGuardDurableObject"]
+      "new_sqlite_classes": ["WorktreeMutex", "SwarmFlowState", "RealtimeRoom", "BillingGuardDurableObject", "GatewayKvEntry"]
     }
   ]
 }

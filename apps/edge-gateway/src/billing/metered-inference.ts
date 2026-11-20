@@ -1,5 +1,6 @@
 import {
   GitViseError,
+  type InferenceEmbeddingRequest,
   type InferenceEvent,
   type InferencePort,
   type InferenceRequest,
@@ -15,6 +16,9 @@ export type { UsageRecord } from './usage';
 
 /** Output allowance assumed when a request does not set `maxOutputTokens`. Matches the largest tier. */
 const DEFAULT_OUTPUT_ALLOWANCE_TOKENS = 8_192;
+/** Embeddings are billed at the cheapest tier's rate. Changing this is a pricing decision, not a code fix. */
+const EMBEDDING_BILLING_TIER: InferenceTier = 'fast-3b';
+const EMBEDDING_RATE_PENCE_PER_MILLION_TOKENS = MODEL_RATE_PENCE_PER_MILLION_TOKENS[EMBEDDING_BILLING_TIER];
 
 export interface InferencePrincipal {
   readonly orgId: string;
@@ -30,6 +34,8 @@ export interface MeteredInferenceOptions {
   readonly fallbackAboveTokens?: number | undefined;
   /** Which model served a call. Stored on the usage row for audit. */
   readonly describeModel: (tier: InferenceTier, external: boolean) => string;
+  /** Embedding model id, stored on the usage row for audit. Empty when embedding is not configured. */
+  readonly embeddingModel?: string | undefined;
   /**
    * Writes the usage row to D1. Called once per settlement, after the debit. If it throws, the record stays in the
    * guard's outbox and the scheduled reconciliation writes it later.
@@ -93,6 +99,47 @@ export class MeteredInferenceDecorator {
     });
   }
 
+  /**
+   * Metered embedding. Reserves an estimate, embeds, and settles the estimated token count once. Embedding has
+   * no tier of its own, so it is billed at the cheapest tier's rate and the usage row records the embedding
+   * model id. A failed call releases its hold.
+   */
+  async embed(
+    request: InferenceEmbeddingRequest,
+    principal: InferencePrincipal,
+  ): Promise<readonly (readonly number[])[]> {
+    const requestId = request.requestId;
+    if (request.inputs.length === 0) return [];
+    const promptTokens = request.inputs.reduce((sum, input) => sum + estimateTokens(input), 0);
+    const ratePence = EMBEDDING_RATE_PENCE_PER_MILLION_TOKENS;
+    const guard = this.options.guards.getByName(principal.orgId);
+    const hold = await guard.reserve({ requestId, estimatePence: costPence(promptTokens, ratePence) });
+    if (!hold.ok) throw new CreditExhaustedError(hold.availablePence);
+
+    let vectors: readonly (readonly number[])[];
+    try {
+      vectors = await this.options.inner.embed(request);
+    } catch (error) {
+      await guard.release(requestId).catch(() => undefined);
+      throw error;
+    }
+
+    await this.settleCall(
+      guard,
+      {
+        requestId,
+        principal,
+        tier: EMBEDDING_BILLING_TIER,
+        model: this.options.embeddingModel ?? 'unconfigured-embedding-model',
+        promptEstimate: promptTokens,
+        ratePence,
+      },
+      { promptTokens, completionTokens: 0, totalTokens: promptTokens },
+      0,
+    );
+    return vectors;
+  }
+
   private meter(
     upstream: ReadableStream<InferenceEvent>,
     call: {
@@ -135,7 +182,7 @@ export class MeteredInferenceDecorator {
         const event = next.value;
         if (event.type === 'token') {
           producedChars += event.text.length;
-        } else {
+        } else if (event.type === 'usage') {
           providerUsage = event.usage;
           // Settle before the client sees the usage event, so a client that trusts it can rely on the
           // debit having happened.
@@ -207,5 +254,11 @@ export class DirectInferenceDisabled implements InferencePort {
 
   stream(): ReadableStream<InferenceEvent> {
     throw new GitViseError('INVALID_STATE', 'direct inference is disabled; route calls through MeteredInferenceDecorator.open');
+  }
+
+  embed(): Promise<readonly (readonly number[])[]> {
+    return Promise.reject(
+      new GitViseError('INVALID_STATE', 'direct embedding is disabled; route calls through MeteredInferenceDecorator.embed'),
+    );
   }
 }

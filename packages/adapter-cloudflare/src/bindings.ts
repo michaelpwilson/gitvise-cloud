@@ -34,6 +34,8 @@ export interface GitViseBindings {
   readonly AI_MODEL_WORKER_7B?: string;
   /** Workers AI model used for the `architect-30b` tier. */
   readonly AI_MODEL_ARCHITECT_30B?: string;
+  /** Workers AI embedding model. Its output width must match the Vectorize index (1024 for bge-large). */
+  readonly AI_MODEL_EMBED?: string;
   /** Optional external OpenAI-compatible endpoint for long architect prompts. Empty disables it. */
   readonly ARCHITECT_FALLBACK_URL?: string;
   readonly ARCHITECT_FALLBACK_MODEL?: string;
