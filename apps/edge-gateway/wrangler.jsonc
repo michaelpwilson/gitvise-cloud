@@ -26,6 +26,10 @@
 		{ "pattern": "gitvise.com/api/keys/*", "zone_name": "gitvise.com" },
 		{ "pattern": "gitvise.com/api/billing/*", "zone_name": "gitvise.com" },
 		{ "pattern": "gitvise.com/api/webhooks/stripe", "zone_name": "gitvise.com" },
+		// Signup wizard: the confirmation link, the pending-signup status, and the onboarding steps after sign-in.
+		{ "pattern": "gitvise.com/api/auth/signup/*", "zone_name": "gitvise.com" },
+		{ "pattern": "gitvise.com/api/auth/onboarding", "zone_name": "gitvise.com" },
+		{ "pattern": "gitvise.com/api/auth/onboarding/*", "zone_name": "gitvise.com" },
 		// Custom hostname for gitvise-web's GITSTRAND_API_URL. Worker-to-Worker fetches to the workers.dev URL do
 		// not reach this Worker from gitvise-web, so the web proxy calls this hostname instead.
 		{ "pattern": "api.gitvise.com", "custom_domain": true, "zone_name": "gitvise.com" }
@@ -36,6 +40,21 @@
 			"enabled": true
 		}
 	},
+	// Cloudflare Email Service: sends the signup confirmation. The sender domain (mail.gitvise.com) is a verified sending subdomain.
+	"send_email": [
+		{
+			"name": "EMAIL"
+		}
+	],
+	// Edge rate limit for requests forwarded to apps/api: 300 a minute per signed-in user, or per client IP when signed
+	// out. It is one local check, so it replaces the per-request KV round trips the API's own throttler used to make.
+	"ratelimits": [
+		{
+			"name": "API_RATE_LIMIT",
+			"namespace_id": "1001",
+			"simple": { "limit": 300, "period": 60 }
+		}
+	],
 	// Workers AI: the `AI` binding serves all three inference tiers.
 	"ai": {
 		"binding": "AI"
@@ -218,11 +237,20 @@
 		"ARCHITECT_FALLBACK_URL": "",
 		"ARCHITECT_FALLBACK_MODEL": "",
 		// Stripe Checkout. Price ids come from the Stripe dashboard. Empty means that product is not sold.
-		"STRIPE_PRICE_PRO": "prod_VesakP0zrt5Ysp",
-		"STRIPE_PRICE_BUSINESS_SEAT": "prod_VesxlguYBrwD5e",
-		"STRIPE_PRICE_ENTERPRISE_SEAT": "prod_VesxEpnREqO2Im",
-		"STRIPE_PRICE_TOPUP_15": "prod_VesyveHuWjevvd",
-		// Where Checkout returns the customer. Must be an https URL you control.
-		"BILLING_RETURN_URL": ""
+		"STRIPE_PRICE_PRO": "price_1UdYpERVRTem0kIN5DU0WpdQ",
+		"STRIPE_PRICE_BUSINESS_SEAT": "price_1UdZBDRVRTem0kINgiVEW2CQ",
+		"STRIPE_PRICE_ENTERPRISE_SEAT": "price_1UdZBdRVRTem0kINXEH9O4IO",
+		"STRIPE_PRICE_TOPUP_15": "price_1UdZCRRVRTem0kINBgKCPyit",
+		// Where Checkout returns the customer. Must be an https URL you control. Checkout refuses to open while this is
+		// empty, so the signup wizard's payment step depends on it. The onboarding gate resumes the flow on return.
+		"BILLING_RETURN_URL": "https://web.gitvise.com/",
+		// Signup: the public web origin for the confirmation link, and the verified sender for that email.
+		"PUBLIC_APP_URL": "https://web.gitvise.com",
+		// Passkeys. The RP ID is the host the browser is on, so a passkey made here cannot be used on another host.
+		// Changing it later means every passkey must be registered again.
+		"WEBAUTHN_RP_ID": "web.gitvise.com",
+		"WEBAUTHN_RP_NAME": "GitStrand",
+		"WEBAUTHN_ORIGINS": "https://web.gitvise.com",
+		"SIGNUP_FROM_ADDRESS": "GitStrand <no-reply@mail.gitvise.com>"
 	}
 }

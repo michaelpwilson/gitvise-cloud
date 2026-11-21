@@ -27,7 +27,9 @@ import { applyStripeEvent, HANDLED_STRIPE_EVENTS } from './billing/webhooks';
 import { reconcileBilling } from './billing/reconcile';
 import { createCheckoutSession, verifyStripeSignature, type StripeEvent } from './billing/stripe';
 import { isPaidTier, PLANS, TOPUP_PACK, type PaidTier } from './billing/plans';
+import { changeSeats } from './billing/seats';
 import { refuseCrossSiteWrite, requireOperator, requireOwner, requirePrincipal, resolvePrincipal } from './auth/principal';
+import { limitForwardedRequest } from './rate-limit';
 import { GATEWAY_IDENTITY_HEADERS, setGatewayIdentity } from './auth/gateway-identity';
 import { authRoutes } from './routes/auth';
 import { keyRoutes } from './routes/keys';
@@ -358,7 +360,7 @@ app.post('/v1/inference/:tier', async (c) => {
 // Billing: Stripe Checkout, webhook, and status. Checkout is owner-only, and the org comes from the principal.
 
 app.post('/api/billing/checkout', requireOwner, async (c) => {
-  const { orgId } = c.get('principal');
+  const { orgId, userId } = c.get('principal');
   const body = await readJson<CheckoutBody>(c.req.raw);
   const secret = c.env.STRIPE_SECRET_KEY ?? '';
   const returnUrl = (c.env.BILLING_RETURN_URL ?? '').trim();
@@ -403,7 +405,24 @@ app.post('/api/billing/checkout', requireOwner, async (c) => {
   }
 
   const session = await createCheckoutSession(secret, params);
+  // Marks the owner's Checkout as started. If they leave without paying, the onboarding steps send them back to the
+  // plan picker, so the next sign-in does not resume a Checkout they abandoned.
+  if (body.kind === 'subscription') {
+    await c.env.D1.prepare('UPDATE users SET checkout_started_at = ?1 WHERE id = ?2 AND org_id = ?3')
+      .bind(Date.now(), userId, orgId)
+      .run();
+  }
   return c.json({ sessionId: session.id, url: session.url }, 201);
+});
+
+// Seats on a Business or Enterprise subscription. Owners only, since this changes what the organisation pays.
+app.post('/api/billing/seats', requireOwner, async (c) => {
+  const { orgId } = c.get('principal');
+  const body = await readJson<{ seats?: unknown }>(c.req.raw);
+  const seats = seatCount(body.seats);
+  const secret = c.env.STRIPE_SECRET_KEY ?? '';
+  if (secret === '') return unconfigured(c, 'Stripe is not configured');
+  return c.json(await changeSeats({ db: c.env.D1, secretKey: secret, orgId, seats }));
 });
 
 app.post('/api/webhooks/stripe', async (c) => {
@@ -500,6 +519,8 @@ app.all('*', async (c) => {
   // its identity attached here. Any other caller is forwarded with no identity, and the container checks its own
   // bearer token (for example a personal access token used by Git). A caller's identity headers are never kept.
   const principal = await resolvePrincipal(c);
+  const limited = await limitForwardedRequest(c, principal);
+  if (limited !== undefined) return limited;
   if (principal !== undefined) {
     const refusal = refuseCrossSiteWrite(c, principal);
     if (refusal !== undefined) return refusal;

@@ -118,3 +118,70 @@ function hexToBytes(hex: string): Uint8Array | undefined {
   for (let i = 0; i < bytes.length; i++) bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   return bytes;
 }
+
+/**
+ * A form-encoded call to the Stripe REST API. `path` starts with `/`. GET params go in the query string, and POST
+ * params go in the form body. Throws `UPSTREAM_FAILURE` on any non-2xx response, so callers never see a half-applied
+ * change reported as success.
+ */
+export async function stripeRequest(
+  secretKey: string,
+  method: 'GET' | 'POST',
+  path: string,
+  params: readonly (readonly [string, string])[] = [],
+  fetchImpl: typeof fetch = fetch,
+): Promise<StripeObject> {
+  const encoded = new URLSearchParams(params as [string, string][]).toString();
+  const url = method === 'GET' && encoded !== '' ? `${STRIPE_API_BASE}${path}?${encoded}` : `${STRIPE_API_BASE}${path}`;
+  const headers: Record<string, string> = { authorization: `Bearer ${secretKey}` };
+  if (method === 'POST') headers['content-type'] = 'application/x-www-form-urlencoded';
+  const init: RequestInit = method === 'POST' ? { method, headers, body: encoded } : { method, headers };
+  const response = await fetchImpl(url, init).catch((error: unknown) => {
+    throw upstreamError('Stripe request failed', error);
+  });
+  if (!response.ok) {
+    throw upstreamError(`Stripe returned ${response.status}: ${await response.text().catch(() => '')}`);
+  }
+  return (await response.json()) as StripeObject;
+}
+
+/** The id of the first line item on a subscription. Seat counts live on that item as its quantity. */
+export async function subscriptionItemId(
+  secretKey: string,
+  subscriptionId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const subscription = await stripeRequest(
+    secretKey,
+    'GET',
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    [],
+    fetchImpl,
+  );
+  const items = subscription['items'] as { data?: unknown } | undefined;
+  const first = Array.isArray(items?.data) ? (items.data[0] as StripeObject | undefined) : undefined;
+  const id = first === undefined ? undefined : stringField(first, 'id');
+  if (id === undefined) throw upstreamError('Stripe returned a subscription without a line item');
+  return id;
+}
+
+/** Sets the seat count on a subscription item. Stripe prorates the change for the rest of the current period. */
+export async function setSubscriptionQuantity(
+  secretKey: string,
+  subscriptionId: string,
+  itemId: string,
+  quantity: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  await stripeRequest(
+    secretKey,
+    'POST',
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    [
+      ['items[0][id]', itemId],
+      ['items[0][quantity]', String(quantity)],
+      ['proration_behavior', 'create_prorations'],
+    ],
+    fetchImpl,
+  );
+}

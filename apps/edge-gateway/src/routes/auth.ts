@@ -1,24 +1,31 @@
-import { Hono, type Context } from 'hono';
-import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import { Hono } from 'hono';
+import { deleteCookie, getCookie } from 'hono/cookie';
 import { GitViseError } from '@gitvise/core';
 import type { AppEnv } from '../app-env';
-import { hashPassword, randomHex, signToken, verifyPassword } from '../crypto';
+import { hashPassword, randomHex, verifyPassword } from '../crypto';
 import { emailValue, isUniqueViolation, passwordValue, readJson } from '../http';
 import {
   requirePrincipal,
   roleFor,
   SESSION_COOKIE,
   SESSION_COOKIE_ATTRIBUTES,
-  SESSION_TTL_SECONDS,
   sessionIdFromCookie,
 } from '../auth/principal';
-import type { Role } from '../auth/types';
+import { sessionSecret, startSession, unconfigured } from '../auth/session-issue';
+import { signupRoutes } from './signup';
+import { onboardingRoutes } from './onboarding';
 
 /**
  * Dashboard sign-up and sign-in. Both are public, since they are how a caller gets a session. Sign-up provisions
  * a personal organisation and makes the new user its owner, so every account is a tenant from its first request.
+ *
+ * `POST /register` is the one-step password sign-up that predates the wizard. The wizard uses `/signup/*`, which
+ * confirms the email before it creates the account. See ./signup.ts.
  */
 export const authRoutes = new Hono<AppEnv>();
+
+authRoutes.route('/signup', signupRoutes);
+authRoutes.route('/onboarding', onboardingRoutes);
 
 authRoutes.post('/register', async (c) => {
   const secret = sessionSecret(c);
@@ -42,6 +49,11 @@ authRoutes.post('/register', async (c) => {
         orgId,
         email,
         passwordHash,
+      ),
+      // apps/api bills a personal repository through this row (see loadPersonalOwnerBilling). Without it, chat is refused.
+      c.env.D1.prepare("INSERT INTO organization_members (organization_id, user_id, role) VALUES (?1, ?2, 'owner')").bind(
+        orgId,
+        userId,
       ),
     ]);
   } catch (error) {
@@ -106,31 +118,6 @@ authRoutes.post('/logout', async (c) => {
   c.header('cache-control', 'no-store');
   return c.body(null, 204);
 });
-
-/** The HMAC key for sessions. Undefined when unset, so sign-in refuses rather than issuing unverifiable tokens. */
-function sessionSecret(c: Context<AppEnv>): string | undefined {
-  const secret = c.env.SESSION_SECRET ?? '';
-  return secret === '' ? undefined : secret;
-}
-
-function unconfigured(c: Context<AppEnv>): Response {
-  return c.json({ error: { code: 'UNCONFIGURED', message: 'SESSION_SECRET is not set' } }, 503);
-}
-
-/** Records a session row, then sets a cookie that points at it. The row is what makes the session valid. */
-async function startSession(
-  c: Context<AppEnv>,
-  secret: string,
-  claims: { readonly userId: string; readonly orgId: string; readonly role: Role },
-): Promise<void> {
-  const sid = `ses-${randomHex(16)}`;
-  const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
-  await c.env.D1.prepare('INSERT INTO sessions (id, user_id, org_id, role, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)')
-    .bind(sid, claims.userId, claims.orgId, claims.role, exp)
-    .run();
-  const token = await signToken({ sid, sub: claims.userId, org: claims.orgId, role: claims.role, exp }, secret);
-  setCookie(c, SESSION_COOKIE, token, { ...SESSION_COOKIE_ATTRIBUTES, maxAge: SESSION_TTL_SECONDS });
-}
 
 let decoy: Promise<string> | undefined;
 function decoyHash(): Promise<string> {

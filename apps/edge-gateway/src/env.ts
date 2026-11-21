@@ -30,6 +30,8 @@ export interface GatewayEnv extends GitViseBindings {
    * instance (`API_CONTAINER_INSTANCE`). See ./api-container.ts.
    */
   readonly GitViseApiContainer: DurableObjectNamespace<GitViseApiContainer>;
+  /** Edge rate limit for requests forwarded to apps/api. Optional so tests and local runs without the binding still work. */
+  readonly API_RATE_LIMIT?: RateLimit | undefined;
   /**
    * Public origin of this gateway, with no trailing slash. apps/api calls the gateway's `/internal/*` routes here, so
    * it must reach this Worker. Plain var in wrangler.jsonc.
@@ -65,4 +67,25 @@ export interface GatewayEnv extends GitViseBindings {
   readonly STRIPE_PRICE_TOPUP_15?: string | undefined;
   /** Where Checkout sends the customer back to. Must be an https URL you control. */
   readonly BILLING_RETURN_URL?: string | undefined;
+
+  /**
+   * Cloudflare Email Service binding, used for the signup confirmation email. Without it, signup refuses to start,
+   * so no account is created that cannot be confirmed. Set in wrangler.jsonc under `send_email`.
+   */
+  readonly EMAIL?: SendEmail | undefined;
+  /** Sender of the signup email. Must be on a domain verified for Email Service. Plain var in wrangler.jsonc. */
+  readonly SIGNUP_FROM_ADDRESS?: string | undefined;
+  /**
+   * The public origin the web app is served from, with no trailing slash. The confirmation link and the redirect after
+   * confirming both use it. Plain var in wrangler.jsonc.
+   */
+  readonly PUBLIC_APP_URL?: string | undefined;
+
+  /**
+   * WebAuthn relying party for passkeys, passed to the apps/api container. The RP ID must be the host the browser is
+   * on (`web.gitvise.com`), and the origin list must be the https origin of that host. Plain vars in wrangler.jsonc.
+   */
+  readonly WEBAUTHN_RP_ID?: string | undefined;
+  readonly WEBAUTHN_RP_NAME?: string | undefined;
+  readonly WEBAUTHN_ORIGINS?: string | undefined;
 }

@@ -29,13 +29,39 @@ export class GitViseApiContainer extends Container<GatewayEnv> {
 
   constructor(ctx: ConstructorParameters<typeof Container>[0], env: GatewayEnv) {
     super(ctx, env);
-    this.envVars = {
-      PORT: String(API_CONTAINER_PORT),
-      GITVISE_RUNTIME: 'cloudflare',
-      CLOUDFLARE_GATEWAY_URL: env.CLOUDFLARE_GATEWAY_URL ?? '',
-      INTERNAL_GATEWAY_SECRET: env.INTERNAL_GATEWAY_SECRET ?? '',
-      // gitvise-healthd runs beside apps/api in this container (start-container.sh), on this port.
-      NATIVE_CORE_HEALTH_METRICS_URL: API_CONTAINER_HEALTH_METRICS_URL,
-    };
+    this.envVars = apiContainerEnv(env);
   }
+}
+
+/**
+ * The environment the apps/api container starts with. Pure, so the WebAuthn values can be tested without the
+ * Cloudflare container runtime.
+ *
+ * The WebAuthn relying party must be the host the browser is on. Without these, apps/api falls back to `localhost`
+ * and browsers refuse every passkey on the hosted site. Blank values fall back to apps/api's defaults, which are
+ * wrong for hosted use, so set them in wrangler.jsonc.
+ */
+export type ApiContainerEnv = {
+  readonly PORT: string;
+  readonly GITVISE_RUNTIME: string;
+  readonly CLOUDFLARE_GATEWAY_URL: string;
+  readonly INTERNAL_GATEWAY_SECRET: string;
+  readonly NATIVE_CORE_HEALTH_METRICS_URL: string;
+  readonly WEBAUTHN_RP_ID: string;
+  readonly WEBAUTHN_RP_NAME: string;
+  readonly WEBAUTHN_ORIGINS: string;
+};
+
+export function apiContainerEnv(env: GatewayEnv): ApiContainerEnv {
+  return {
+    PORT: String(API_CONTAINER_PORT),
+    GITVISE_RUNTIME: 'cloudflare',
+    CLOUDFLARE_GATEWAY_URL: env.CLOUDFLARE_GATEWAY_URL ?? '',
+    INTERNAL_GATEWAY_SECRET: env.INTERNAL_GATEWAY_SECRET ?? '',
+    // gitvise-healthd runs beside apps/api in this container (start-container.sh), on this port.
+    NATIVE_CORE_HEALTH_METRICS_URL: API_CONTAINER_HEALTH_METRICS_URL,
+    WEBAUTHN_RP_ID: env.WEBAUTHN_RP_ID ?? '',
+    WEBAUTHN_RP_NAME: env.WEBAUTHN_RP_NAME ?? '',
+    WEBAUTHN_ORIGINS: env.WEBAUTHN_ORIGINS ?? '',
+  };
 }
